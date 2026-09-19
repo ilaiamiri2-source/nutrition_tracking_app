@@ -4,7 +4,103 @@ import streamlit as st
 import database as db
 import utils
 import profile_view
+import extra_streamlit_components as stx
 
+st.set_page_config(
+    page_title="ApexNutri | Elite Sports Nutrition Portal",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------------------------------------------------
+# AUTHENTICATION & COOKIE MANAGEMENT
+# ---------------------------------------------------------
+def get_cookie_manager():
+    """Initializes and returns a persistent cookie manager."""
+    return stx.CookieManager(key="apex_auth_cookie_manager")
+
+def check_authentication():
+    """
+    Validates user authentication via session state or persistent 30-day browser cookie.
+    Safely handles missing local secrets.toml during local development.
+    """
+    cookie_manager = get_cookie_manager()
+
+    # 1. Default clinic credentials
+    default_users = {
+        "ilaiamiri2@gmail.com": "1234",
+        "ashlagit@gmail.com": "5678",
+        "admin": "apex2026"
+    }
+
+    # Safely fetch authorized users from Streamlit secrets or fall back to defaults
+    configured_users = default_users
+    try:
+        if "users" in st.secrets:
+            configured_users = st.secrets["users"]
+    except Exception:
+        pass
+
+    # 2. Check if already authenticated in current session
+    if st.session_state.get("authenticated", False):
+        return True
+
+    # 3. Check for persistent browser cookie
+    saved_user = cookie_manager.get("apex_auth_user")
+    if saved_user and saved_user in configured_users:
+        st.session_state["authenticated"] = True
+        st.session_state["user_email"] = saved_user
+        return True
+
+    # 4. Render clean clinical login form
+    st.markdown("<div style='height: 40px;'></div>", unsafe_allow_html=True)
+    col_l1, col_l2, col_l3 = st.columns([1, 1.4, 1])
+    with col_l2:
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div style="
+                display: inline-flex;
+                background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+                color: white;
+                width: 54px;
+                height: 54px;
+                border-radius: 14px;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+                font-size: 28px;
+                margin-bottom: 12px;
+            ">⚡</div>
+            <h2 style="margin: 0; color: #0f172a; font-weight: 800; letter-spacing: -0.02em;">ApexNutri Portal</h2>
+            <p style="color: #64748b; font-size: 0.92rem; margin-top: 4px;">Clinical Nutrition & Athlete Management</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.form("form_login"):
+            username_input = st.text_input("Username / Email:", placeholder="e.g. ilaiamiri2@gmail.com").strip().lower()
+            password_input = st.text_input("Password:", type="password", placeholder="Enter your access code")
+            remember_me = st.checkbox("Keep me logged in for 30 days (Cookie)", value=True)
+
+            submitted = st.form_submit_button("Sign In to Portal", use_container_width=True)
+            if submitted:
+                if username_input in configured_users and str(configured_users[username_input]) == str(password_input):
+                    st.session_state["authenticated"] = True
+                    st.session_state["user_email"] = username_input
+
+                    if remember_me:
+                        expires_date = datetime.datetime.now() + datetime.timedelta(days=30)
+                        cookie_manager.set("apex_auth_user", username_input, expires_at=expires_date)
+
+                    st.success("Authenticated successfully!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username/email or password.")
+
+    st.stop()
+
+# Enforce authentication before loading portal assets and database
+check_authentication()
 
 # Initialize database schema, backup snapshot, seed data, and styling
 db.init_db()
@@ -288,6 +384,20 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # Logged-in User & Logout
+    logged_user = st.session_state.get("user_email", "Authenticated User")
+    st.sidebar.markdown(f"""
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.82rem; color: #334155;">
+        👤 <b>Logged in as:</b><br><span style="color: #0284c7; word-break: break-all;">{logged_user}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.sidebar.button("🚪 Log Out", use_container_width=True, help="Clear session and remove saved browser cookie"):
+        cookie_manager = get_cookie_manager()
+        cookie_manager.delete("apex_auth_user")
+        st.session_state["authenticated"] = False
+        st.session_state["user_email"] = None
+        st.rerun()
+
     df_athletes = db.get_all_athletes_summary()
     athlete_map = dict(zip(df_athletes["id"], df_athletes["full_name"])) if not df_athletes.empty else {}
 
@@ -347,6 +457,10 @@ def main():
             athlete_id = df_athletes.iloc[0]["id"]
             st.session_state["selected_athlete_id"] = athlete_id
         
+        @profile_view.make_dialog("👤 Register New Elite Athlete")
+        def dialog_register_athlete():
+            pass
+
         if athlete_id:
             profile_view.render_athlete_profile(athlete_id)
         else:
