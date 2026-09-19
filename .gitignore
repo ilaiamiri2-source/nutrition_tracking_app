@@ -1,0 +1,11 @@
+# Local database and uploaded data
+*.db
+sports_nutrition.db
+config.json
+uploads/
+backups/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
