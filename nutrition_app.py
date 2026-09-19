@@ -5,6 +5,27 @@ import database as db
 import utils
 import profile_view
 
+
+def check_auth():
+    """Restricts access based on allowed emails in st.secrets."""
+    allowed = st.secrets.get("auth", {}).get("allowed_emails", [])
+    
+    # בדיקה האם המשתמש כבר מחובר
+    if not st.experimental_user.is_logged_in:
+        st.warning("⚠️ Access restricted. Please sign in to access the Clinical Portal.")
+        if st.button("Log in with Google"):
+            st.login("google")
+        st.stop()
+    
+    # בדיקה האם המייל של המשתמש מורשה
+    user_email = st.experimental_user.email
+    if user_email not in allowed:
+        st.error(f"⛔ Access Denied: {user_email} is not authorized to view this portal.")
+        if st.button("Log out"):
+            st.logout()
+        st.stop()
+
+
 st.set_page_config(
     page_title="ApexNutri | Elite Sports Nutrition Portal",
     page_icon="⚡",
