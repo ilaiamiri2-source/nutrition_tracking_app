@@ -1,10 +1,10 @@
 import datetime
 import pandas as pd
 import streamlit as st
+import extra_streamlit_components as stx
 import database as db
 import utils
 import profile_view
-import extra_streamlit_components as stx
 
 st.set_page_config(
     page_title="ApexNutri | Elite Sports Nutrition Portal",
@@ -14,27 +14,26 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# AUTHENTICATION & COOKIE MANAGEMENT
+# AUTHENTICATION & PERSISTENT COOKIE MANAGEMENT
 # ---------------------------------------------------------
 def get_cookie_manager():
-    """Initializes and returns a persistent cookie manager."""
-    return stx.CookieManager(key="apex_auth_cookie_manager")
+    """Returns a single unique instance of the cookie manager to prevent duplicate key errors."""
+    if "cookie_manager_instance" not in st.session_state:
+        st.session_state["cookie_manager_instance"] = stx.CookieManager(key="apex_auth_cookie_manager_unique")
+    return st.session_state["cookie_manager_instance"]
 
 def check_authentication():
     """
     Validates user authentication via session state or persistent 30-day browser cookie.
-    Safely handles missing local secrets.toml during local development.
+    Securely reads authorized users from Streamlit Secrets with local fallbacks.
     """
     cookie_manager = get_cookie_manager()
 
-    # 1. Default clinic credentials
+    # Default clinic credentials (used as local fallback if secrets.toml is absent)
     default_users = {
-        "ilaiamiri2@gmail.com": "1234",
-        "ashlagit@gmail.com": "5678",
-        "admin": "apex2026"
+        "testuser@gmail.com": "1234"
     }
 
-    # Safely fetch authorized users from Streamlit secrets or fall back to defaults
     configured_users = default_users
     try:
         if "users" in st.secrets:
@@ -42,18 +41,20 @@ def check_authentication():
     except Exception:
         pass
 
-    # 2. Check if already authenticated in current session
+    # 1. Check if already authenticated in current session state
     if st.session_state.get("authenticated", False):
         return True
 
-    # 3. Check for persistent browser cookie
+    # 2. Check for persistent browser cookie (give cookie_manager a moment to initialize on first load)
     saved_user = cookie_manager.get("apex_auth_user")
+    
+    # If cookie is not immediately available, try one more check or fallback
     if saved_user and saved_user in configured_users:
         st.session_state["authenticated"] = True
         st.session_state["user_email"] = saved_user
         return True
 
-    # 4. Render clean clinical login form
+    # 3. Render clean clinical login form
     st.markdown("<div style='height: 40px;'></div>", unsafe_allow_html=True)
     col_l1, col_l2, col_l3 = st.columns([1, 1.4, 1])
     with col_l2:
@@ -78,7 +79,7 @@ def check_authentication():
         """, unsafe_allow_html=True)
 
         with st.form("form_login"):
-            username_input = st.text_input("Username / Email:", placeholder="e.g. ilaiamiri2@gmail.com").strip().lower()
+            username_input = st.text_input("Username / Email:", placeholder="e.g. testuser@gmail.com").strip().lower()
             password_input = st.text_input("Password:", type="password", placeholder="Enter your access code")
             remember_me = st.checkbox("Keep me logged in for 30 days (Cookie)", value=True)
 
@@ -99,10 +100,8 @@ def check_authentication():
 
     st.stop()
 
-# Enforce authentication before loading portal assets and database
 check_authentication()
 
-# Initialize database schema, backup snapshot, seed data, and styling
 db.init_db()
 db.perform_daily_backup()
 db.seed_mock_data()
@@ -164,7 +163,6 @@ def render_dashboard():
             dialog_register_athlete()
         return
 
-    # Top KPI Quick Tiles
     total_athletes = len(df)
     urgent_count = df["is_urgent"].sum()
 
@@ -217,7 +215,6 @@ def render_dashboard():
 
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-    # Search and Filter Toolbar
     f_col1, f_col2, f_col3, f_col4 = st.columns([2, 1, 1, 1])
     with f_col1:
         search_query = st.text_input("🔍 Search athlete or sport:", placeholder="e.g. Maya, Swimming, Windsurfing...")
@@ -232,7 +229,6 @@ def render_dashboard():
         if st.button("➕ Add Athlete", use_container_width=True):
             dialog_register_athlete()
 
-    # Apply filters
     filtered_df = df.copy()
     if search_query:
         filtered_df = filtered_df[
@@ -244,11 +240,9 @@ def render_dashboard():
     if urgent_filter:
         filtered_df = filtered_df[filtered_df["is_urgent"] == 1]
 
-    # Master Athlete Roster Cards
     st.markdown("### Master Athlete Roster")
 
     for _, row in filtered_df.iterrows():
-        # Clean Blood date & expired status
         blood_date_display = row["latest_blood_date"] if pd.notna(row["latest_blood_date"]) else "None"
         blood_is_expired = False
         if pd.notna(row["latest_blood_date"]):
@@ -259,7 +253,6 @@ def render_dashboard():
             except Exception:
                 pass
 
-        # Clean Body composition strings
         fat_str = "-"
         if pd.notna(row["fat_percentage_caliper"]):
             fat_str = f"{row['fat_percentage_caliper']:.1f}% (Caliper)"
@@ -269,14 +262,12 @@ def render_dashboard():
         weight_display = f"{row['latest_weight']:.1f} kg" if pd.notna(row['latest_weight']) else "-"
         height_display = f"{row['height_cm']:.1f} cm" if pd.notna(row['height_cm']) else "-"
 
-        # Clean Last Consultation display
         consult_raw = row["latest_consult_date"]
         if pd.notna(consult_raw) and str(consult_raw).strip() != "" and str(consult_raw).lower() != "nan":
             consult_display = str(consult_raw)
         else:
             consult_display = "None"
 
-        # Target competition formatting (Line 3 of Col 2)
         comp_display_text = "🎯 No Target Scheduled"
         if pd.notna(row["target_competition_date"]) and str(row["target_competition_date"]).strip():
             try:
@@ -291,24 +282,17 @@ def render_dashboard():
             except Exception:
                 pass
 
-        # Badges for Sport & Gender
         sport_badge = utils.get_sport_badge(row["sport_discipline"])
         gender_badge = utils.get_gender_badge(row["gender"])
 
-        # Individual Athlete Card Container (Guaranteed uniform 3-row layout with generous vertical height)
         with st.container(border=True):
             st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
             card_col1, card_col2, card_col3, card_col4 = st.columns([3.1, 2.7, 2.5, 1.45])
 
             with card_col1:
-                # Row 1: Name + Urgent indicator
                 urgent_icon = "⚠️ " if row["is_urgent"] else ""
                 st.markdown(f"<div style='font-size: 1.22rem; font-weight: 700; color: #0f172a; line-height: 1.2;'>{urgent_icon}{row['full_name']}</div>", unsafe_allow_html=True)
-                
-                # Row 2: Badges (Sport discipline + Gender)
                 st.markdown(f"<div style='display: flex; gap: 8px; align-items: center; margin: 20px 0;'>{sport_badge} {gender_badge}</div>", unsafe_allow_html=True)
-                
-                # Row 3: Alert status or stable profile confirmation
                 if row["is_urgent"] and row["urgent_reason"]:
                     reason_safe = str(row['urgent_reason'])
                     reason_short = (reason_safe[:42] + '...') if len(reason_safe) > 45 else reason_safe
@@ -317,23 +301,13 @@ def render_dashboard():
                     st.markdown("<div style='color: #16a34a; font-size: 0.84rem; font-weight: 600;'>🟢 Stable Profile • In Target</div>", unsafe_allow_html=True)
 
             with card_col2:
-                # Row 1: Weight & Body Fat
                 st.markdown(f"<div style='font-size: 0.95rem; color: #1e293b; line-height: 1.2;'><b>Weight:</b> {weight_display} &nbsp;|&nbsp; <b>Fat:</b> {fat_str}</div>", unsafe_allow_html=True)
-                
-                # Row 2: Height
                 st.markdown(f"<div style='font-size: 0.88rem; color: #64748b; margin: 20px 0;'>Height: {height_display}</div>", unsafe_allow_html=True)
-                
-                # Row 3: Target competition badge
                 st.markdown(f"<div style='font-size: 0.84rem; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>{comp_display_text}</div>", unsafe_allow_html=True)
 
             with card_col3:
-                # Row 1: Consultation
                 st.markdown(f"<div style='font-size: 0.95rem; color: #1e293b; line-height: 1.2;'><b>Consult:</b> {consult_display}</div>", unsafe_allow_html=True)
-                
-                # Row 2: Blood draw date
                 st.markdown(f"<div style='font-size: 0.88rem; color: #64748b; margin: 20px 0;'>Blood: {blood_date_display}</div>", unsafe_allow_html=True)
-                
-                # Row 3: Blood renewal alert status
                 if blood_is_expired:
                     st.markdown("<div style='color: #dc2626; font-size: 0.84rem; font-weight: 700;'>⚠️ Renewal Needed (>6m)</div>", unsafe_allow_html=True)
                 elif pd.notna(row["latest_blood_date"]):
@@ -342,7 +316,6 @@ def render_dashboard():
                     st.markdown("<div style='color: #94a3b8; font-size: 0.84rem;'>No Labs on File</div>", unsafe_allow_html=True)
 
             with card_col4:
-                # Compact button centered vertically inside taller card
                 st.markdown("<div style='height: 42px;'></div>", unsafe_allow_html=True)
                 st.markdown("<div class='roster-btn-container'>", unsafe_allow_html=True)
                 if st.button("Open Card →", key=f"btn_athlete_{row['id']}", use_container_width=True):
